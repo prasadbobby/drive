@@ -3,7 +3,6 @@ from flask_cors import CORS
 import pandas as pd
 import os
 import numpy as np
-import torch
 import io
 import json
 import time
@@ -1203,31 +1202,31 @@ class DataManager:
            APP_STATE["loading_progress"]["data"] = {"status": "error", "message": str(e)}
    
    def load_embeddings(self):
-       try:
-           categories = ['clinical', 'literature', 'symptom', 'drug', 'diet']
-           
-           success = True
-           for category in categories:
-               try:
-                   embedding_path = f"{self.embeddings_dir}/{category}_embeddings.pt"
-                   if os.path.exists(embedding_path):
-                       self.embeddings[category] = torch.load(embedding_path, map_location=torch.device('cpu'))
-                       logger.info(f"Loaded {len(self.embeddings[category])} {category} embeddings")
-                   else:
-                       logger.info(f"No embeddings found for {category}, will generate when needed")
-               except Exception as e:
-                   logger.error(f"Error loading {category} embeddings: {str(e)}")
-                   success = False
-           
-           if success:
-               APP_STATE["loading_progress"]["embeddings"] = {"status": "complete", "message": "Embeddings loaded successfully"}
-           else:
-               APP_STATE["loading_progress"]["embeddings"] = {"status": "warning", "message": "Some embeddings could not be loaded"}
-               
-       except Exception as e:
-           logger.error(f"Error loading embeddings: {str(e)}")
-           APP_STATE["loading_progress"]["embeddings"] = {"status": "error", "message": str(e)}
-   
+    try:
+        categories = ['clinical', 'literature', 'symptom', 'drug', 'diet']
+        
+        success = True
+        for category in categories:
+            try:
+                embedding_path = f"{self.embeddings_dir}/{category}_embeddings.npy"
+                if os.path.exists(embedding_path):
+                    self.embeddings[category] = np.load(embedding_path, allow_pickle=True).tolist()
+                    logger.info(f"Loaded {len(self.embeddings[category])} {category} embeddings")
+                else:
+                    logger.info(f"No embeddings found for {category}, will generate when needed")
+            except Exception as e:
+                logger.error(f"Error loading {category} embeddings: {str(e)}")
+                success = False
+        
+        if success:
+            APP_STATE["loading_progress"]["embeddings"] = {"status": "complete", "message": "Embeddings loaded successfully"}
+        else:
+            APP_STATE["loading_progress"]["embeddings"] = {"status": "warning", "message": "Some embeddings could not be loaded"}
+            
+    except Exception as e:
+        logger.error(f"Error loading embeddings: {str(e)}")
+        APP_STATE["loading_progress"]["embeddings"] = {"status": "error", "message": str(e)}
+
    def category_exists(self, category: str) -> bool:
        return category in self.data
    
@@ -1288,40 +1287,41 @@ class DataManager:
            return []
    
    def generate_embeddings(self, category: str) -> bool:
-       try:
-           if category not in self.data:
-               logger.warning(f"Category {category} not found in data")
-               return False
-           
-           model_manager = ModelManager()
-           records = self.data[category]
-           category_embeddings = []
-           
-           for record in records:
-               text = self.prepare_text_for_embedding(record, category)
-               
-               embedding = model_manager.get_embedding(text)
-               
-               if embedding:
-                   category_embeddings.append({
-                       'record': record,
-                       'embedding': embedding
-                   })
-               else:
-                   logger.warning(f"Failed to get embedding for record in {category}")
-           
-           with self.embedding_lock:
-               self.embeddings[category] = category_embeddings
-               
-               torch.save(category_embeddings, f"{self.embeddings_dir}/{category}_embeddings.pt")
-           
-           logger.info(f"Generated {len(category_embeddings)} embeddings for {category} category")
-           return True
-           
-       except Exception as e:
-           logger.error(f"Error generating embeddings for {category}: {str(e)}")
-           return False
-   
+    try:
+        if category not in self.data:
+            logger.warning(f"Category {category} not found in data")
+            return False
+        
+        model_manager = ModelManager()
+        records = self.data[category]
+        category_embeddings = []
+        
+        for record in records:
+            text = self.prepare_text_for_embedding(record, category)
+            
+            embedding = model_manager.get_embedding(text)
+            
+            if embedding:
+                category_embeddings.append({
+                    'record': record,
+                    'embedding': embedding
+                })
+            else:
+                logger.warning(f"Failed to get embedding for record in {category}")
+        
+        with self.embedding_lock:
+            self.embeddings[category] = category_embeddings
+            
+            # Save using numpy instead of torch
+            np.save(f"{self.embeddings_dir}/{category}_embeddings.npy", np.array(category_embeddings, dtype=object))
+        
+        logger.info(f"Generated {len(category_embeddings)} embeddings for {category} category")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error generating embeddings for {category}: {str(e)}")
+        return False
+
    def refresh_embeddings(self, category: str) -> Dict:
        try:
            if category not in self.data:
